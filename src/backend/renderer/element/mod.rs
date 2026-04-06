@@ -36,7 +36,7 @@ use crate::{
 use super::utils::Buffer;
 use super::{
     utils::{CommitCounter, DamageSet, OpaqueRegions},
-    Renderer,
+    PresentationMode, Renderer,
 };
 
 pub mod memory;
@@ -264,8 +264,12 @@ pub enum UnderlyingStorage<'a> {
 pub enum RenderingReason {
     /// The element buffer format is unsuited for direct scan-out
     FormatUnsupported,
+    /// The element buffer format is unsuited for async direct scan-out
+    AsyncFormatUnsupported,
     /// Element was selected for direct scan-out but failed
     ScanoutFailed,
+    /// Element was selected for async direct scan-out but failed
+    AsyncScanoutFailed,
 }
 
 /// Defines the presentation state of an element after rendering
@@ -281,6 +285,8 @@ pub enum RenderElementPresentationState {
     },
     /// The element was selected for zero-copy scan-out
     ZeroCopy,
+    /// The element was selected for zero-copy async scan-out
+    Async,
     /// The element was skipped as it is current not visible
     Skipped,
 }
@@ -553,6 +559,7 @@ pub trait Element {
     fn kind(&self) -> Kind {
         Kind::default()
     }
+
     /// Returns whether this elements is a "framebuffer effect".
     ///
     /// Returning `true` will cause implementations of `RenderElement::capture_framebuffer`
@@ -563,9 +570,13 @@ pub trait Element {
     /// element, if a capture is queued up, to make sure the framebuffer contents are available for capture.
     ///
     /// Any damage reported by this element will also cause `capture_framebuffer` to be called.
-    fn is_framebuffer_effect(&self) -> bool {
+  fn is_framebuffer_effect(&self) -> bool {
         false
     }
+    /// Hint for DRM backend on how the element should be presented
+    fn presentation_mode(&self) -> PresentationMode {
+        PresentationMode::VSync
+    } 
 }
 
 /// A single render element
@@ -669,6 +680,10 @@ where
 
     fn is_framebuffer_effect(&self) -> bool {
         (*self).is_framebuffer_effect()
+    }
+
+    fn presentation_mode(&self) -> PresentationMode {
+        (*self).presentation_mode()
     }
 }
 
@@ -1099,7 +1114,7 @@ macro_rules! render_elements_internal {
             }
         }
 
-        fn is_framebuffer_effect(&self) -> bool {
+       fn is_framebuffer_effect(&self) -> bool {
             match self {
                 $(
                     #[allow(unused_doc_comments)]
@@ -1111,7 +1126,19 @@ macro_rules! render_elements_internal {
                 Self::_GenericCatcher(_) => unreachable!(),
             }
         }
-    };
+
+        fn presentation_mode(&self) -> $crate::backend::renderer::PresentationMode {
+            match self {
+                $(
+                    #[allow(unused_doc_comments)]
+                    $(
+                        #[$meta]
+                    )*
+                    Self::$body(x) => $crate::render_elements_internal!(@call presentation_mode; x)
+                ),*,
+                Self::_GenericCatcher(_) => unreachable!(),
+            }
+        } 
     (@draw <$renderer:ty>; $($(#[$meta:meta])* $body:ident=$field:ty $(as <$other_renderer:ty>)?),* $(,)?) => {
         fn draw(
             &self,
@@ -1799,6 +1826,10 @@ where
 
     fn is_framebuffer_effect(&self) -> bool {
         self.0.is_framebuffer_effect()
+    }
+
+    fn presentation_mode(&self) -> PresentationMode {
+        self.0.presentation_mode()
     }
 }
 

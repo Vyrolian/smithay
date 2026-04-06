@@ -1138,7 +1138,8 @@ macro_rules! render_elements_internal {
                 ),*,
                 Self::_GenericCatcher(_) => unreachable!(),
             }
-        } 
+        }
+        };
     (@draw <$renderer:ty>; $($(#[$meta:meta])* $body:ident=$field:ty $(as <$other_renderer:ty>)?),* $(,)?) => {
         fn draw(
             &self,

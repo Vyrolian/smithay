@@ -202,6 +202,7 @@ impl RenderElementState {
         RenderElementState {
             visible_area,
             presentation_state: RenderElementPresentationState::Async,
+            needs_capture: false,
         }
     }
 

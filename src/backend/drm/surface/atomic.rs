@@ -369,6 +369,7 @@ impl AtomicDrmSurface {
                 &connectors,
                 [],
                 [&plane_state],
+                false,
             )?;
             self.fd
                 .atomic_commit(
@@ -428,6 +429,7 @@ impl AtomicDrmSurface {
             &connectors,
             [&conn],
             [&plane_state],
+            false,
         )?;
         self.fd
             .atomic_commit(
@@ -485,6 +487,7 @@ impl AtomicDrmSurface {
             &conns,
             removed,
             [&plane_state],
+            false,
         )?;
 
         self.fd
@@ -539,6 +542,7 @@ impl AtomicDrmSurface {
             pending.connectors.iter(),
             [],
             [&plane_state],
+            false,
         )?;
         if let Err(err) = self
             .fd
@@ -662,6 +666,7 @@ impl AtomicDrmSurface {
             &pending.connectors,
             &[],
             [&plane_config],
+            false,
         )?;
 
         if *current == *pending {
@@ -734,6 +739,7 @@ impl AtomicDrmSurface {
             &pending_conns,
             removed,
             &*planes,
+            async_commit,
         )?;
 
         let mut flags = AtomicCommitFlags::TEST_ONLY;
@@ -814,6 +820,7 @@ impl AtomicDrmSurface {
 
         // test the new config and return the request if it would be accepted by the driver.
         let prop_mapping = self.prop_mapping.read().unwrap();
+        let is_async = flip_flags.contains(AtomicCommitFlags::PAGE_FLIP_ASYNC);
         let req = {
             let req = AtomicRequest::build_request(
                 &prop_mapping,
@@ -823,6 +830,7 @@ impl AtomicDrmSurface {
                 &pending_conns,
                 removed,
                 &*planes,
+                is_async,
             )?;
 
             if let Err(err) = self.fd.atomic_commit(
@@ -904,6 +912,7 @@ impl AtomicDrmSurface {
 
         // page flips work just like commits with fewer parameters..
         let prop_mapping = self.prop_mapping.read().unwrap();
+        let is_async = flip_flags.contains(AtomicCommitFlags::PAGE_FLIP_ASYNC);
         let req = AtomicRequest::build_request(
             &prop_mapping,
             self.crtc,
@@ -912,6 +921,7 @@ impl AtomicDrmSurface {
             [],
             [],
             &*planes,
+            is_async,
         )?;
 
         // .. and without `AtomicCommitFlags::AllowModeset`.
@@ -1198,13 +1208,17 @@ impl<'a> AtomicRequest<'a> {
         Ok(())
     }
 
-    fn set_plane(&mut self, crtc: crtc::Handle, plane_state: &PlaneState<'a>) -> Result<(), Error> {
+    fn set_plane(&mut self, crtc: crtc::Handle, plane_state: &PlaneState<'a>, is_async: bool) -> Result<(), Error> {
         let handle = plane_state.handle;
         let plane_props = self.plane_props.entry(handle).or_default();
 
         if let Some(config) = plane_state.config.as_ref() {
-            plane_props.insert("CRTC_ID", property::Value::CRTC(Some(crtc)));
-            plane_props.insert("FB_ID", property::Value::Framebuffer(Some(config.fb)));
+                       plane_props.insert("FB_ID", property::Value::Framebuffer(Some(config.fb)));
+              if is_async {
+                return Ok(());
+            }
+             plane_props.insert("CRTC_ID", property::Value::CRTC(Some(crtc)));
+
             // these are 16.16. fixed point
             plane_props.insert(
                 "SRC_X",
@@ -1413,9 +1427,19 @@ impl<'a> AtomicRequest<'a> {
         Ok(())
     }
 
-    fn set_plane(&mut self, crtc: crtc::Handle, plane_state: &PlaneState<'_>) -> Result<(), Error> {
+    fn set_plane(&mut self, crtc: crtc::Handle, plane_state: &PlaneState<'_>, is_async: bool) -> Result<(), Error> {
         let handle = plane_state.handle;
         if let Some(config) = plane_state.config.as_ref() {
+             self.request.add_property(
+                handle,
+                self.mapping.plane_prop_handle(handle, "FB_ID")?,
+                property::Value::Framebuffer(Some(config.fb)),
+            );
+
+            if is_async {
+                return Ok(());
+            }
+
             // connect the plane to the CRTC
             self.request.add_property(
                 handle,
@@ -1423,13 +1447,7 @@ impl<'a> AtomicRequest<'a> {
                 property::Value::CRTC(Some(crtc)),
             );
 
-            // Set the fb for the plane
-            self.request.add_property(
-                handle,
-                self.mapping.plane_prop_handle(handle, "FB_ID")?,
-                property::Value::Framebuffer(Some(config.fb)),
-            );
-
+            
             self.request.add_property(
                 handle,
                 self.mapping.plane_prop_handle(handle, "SRC_X")?,
@@ -1626,34 +1644,33 @@ impl<'a> AtomicRequest<'a> {
         connectors: impl IntoIterator<Item = &'a connector::Handle>,
         removed_connectors: impl IntoIterator<Item = &'a connector::Handle>,
         planes: impl IntoIterator<Item = &'a PlaneState<'a>>,
-    ) -> Result<AtomicRequest<'a>, Error> {
+        is_async: bool,
+    ) -> Result<AtomicRequest<'a>, Error>{
         let mut req = AtomicRequest::new(mapping);
 
-        // requests consist out of a set of properties and their new values
-        // for different drm objects (crtc, plane, connector, ...).
+        // 2. IF ASYNC: Skip CRTC and connectors completely
+        if is_async {
+            for plane_state in planes.into_iter() {
+                req.set_plane(crtc, plane_state, true)?; 
+            }
+            return Ok(req);
+        }
 
-        // for every connector that is new, we need to set our crtc_id
         for conn in connectors {
             req.set_connector(*conn, crtc)?;
         }
-
-        // for every connector that got removed, we need to set no crtc_id.
-        // (this is a bit problematic, because this means we need to remove, commit, add, commit
-        // in the right order to move a connector to another surface. otherwise we disable the
-        // the connector here again...)
         for conn in removed_connectors {
             req.reset_connector(*conn)?;
         }
 
-        // Set the crtc properties (active, mode_id, vrr_enabled).
         req.set_crtc(crtc, blob, vrr)?;
 
         for plane_state in planes.into_iter() {
-            req.set_plane(crtc, plane_state)?;
+            req.set_plane(crtc, plane_state, false)?;
         }
 
         Ok(req)
-    }
+    } 
 }
 
 #[cfg(test)]

@@ -20,9 +20,9 @@ use wayland_protocols::xdg::{
 };
 
 use wayland_server::{
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     backend::{ClientId, GlobalId},
     protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface},
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
 
 use crate::{
@@ -156,7 +156,7 @@ impl XdgToplevelIconUserData {
             .map(|id| guard.remove(id))
         {
             if let Some(shm) = buffer.data::<ShmBufferUserData>() {
-                shm.remove_destruction_hook(hook);
+                shm.remove_destruction_hook(&hook);
             }
         }
     }
@@ -166,7 +166,7 @@ impl XdgToplevelIconUserData {
 
         for (buffer, hook) in guard.drain(..) {
             if let Some(shm) = buffer.data::<ShmBufferUserData>() {
-                shm.remove_destruction_hook(hook);
+                shm.remove_destruction_hook(&hook);
             }
         }
     }

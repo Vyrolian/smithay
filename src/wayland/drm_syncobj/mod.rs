@@ -51,12 +51,12 @@ use wayland_protocols::wp::linux_drm_syncobj::v1::server::{
     wp_linux_drm_syncobj_timeline_v1::{self, WpLinuxDrmSyncobjTimelineV1},
 };
 use wayland_server::{
-    backend::GlobalId, protocol::wl_surface::WlSurface, Client, DataInit, Dispatch, DisplayHandle,
-    GlobalDispatch, New, Resource, Weak as WlWeak,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak as WlWeak,
+    backend::GlobalId, protocol::wl_surface::WlSurface,
 };
 
 use super::{
-    compositor::{self, with_states, BufferAssignment, Cacheable, HookId, SurfaceAttributes},
+    compositor::{self, BufferAssignment, Cacheable, HookId, SurfaceAttributes, with_states},
     dmabuf::get_dmabuf,
 };
 use crate::backend::drm::DrmDeviceFd;
@@ -376,8 +376,8 @@ where
         match request {
             wp_linux_drm_syncobj_surface_v1::Request::Destroy => {
                 if let Ok(surface) = data.surface.upgrade() {
-                    compositor::remove_pre_commit_hook(&surface, data.commit_hook_id.clone());
-                    compositor::remove_destruction_hook(&surface, data.destruction_hook_id.clone());
+                    compositor::remove_pre_commit_hook(&surface, &data.commit_hook_id);
+                    compositor::remove_destruction_hook(&surface, &data.destruction_hook_id);
                     with_states(&surface, |states| {
                         *states
                             .data_map

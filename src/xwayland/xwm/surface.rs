@@ -1,6 +1,7 @@
 use crate::{
     backend::input::KeyState,
     input::{
+        Seat, SeatHandler,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
@@ -8,17 +9,16 @@ use crate::{
             GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::TouchTarget,
-        Seat, SeatHandler,
     },
-    utils::{user_data::UserDataMap, Client, IsAlive, Logical, Rectangle, Serial, Size},
+    utils::{Client, IsAlive, Logical, Rectangle, Serial, Size, user_data::UserDataMap},
     wayland::{
         compositor,
-        seat::{keyboard::enter_internal, WaylandFocus},
+        seat::{WaylandFocus, keyboard::enter_internal},
     },
 };
 #[cfg(feature = "desktop")]
 use crate::{
-    desktop::{utils::under_from_surface_tree, WindowSurfaceType},
+    desktop::{WindowSurfaceType, utils::under_from_surface_tree},
     utils::Point,
 };
 
@@ -28,8 +28,8 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex, Weak,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tracing::warn;
@@ -40,7 +40,7 @@ use x11rb::{
     connection::Connection as _,
     properties::{WmClass, WmHints, WmSizeHints},
     protocol::{
-        res::{query_client_ids, ClientIdSpec},
+        res::{ClientIdSpec, query_client_ids},
         xproto::{
             Atom, AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt as _, EventMask,
             InputFocus, PropMode, Window as X11Window,
@@ -50,7 +50,7 @@ use x11rb::{
     wrapper::ConnectionExt,
 };
 
-use super::{send_configure_notify, X11Wm, XwmId};
+use super::{X11Wm, XwmId, send_configure_notify};
 
 /// X11 window managed by an [`X11Wm`](super::X11Wm)
 #[derive(Debug, Clone)]
@@ -91,7 +91,7 @@ pub(crate) struct SharedSurfaceState {
     hints: Option<WmHints>,
     normal_hints: Option<WmSizeHints>,
     transient_for: Option<X11Window>,
-    net_state: HashSet<Atom>,
+    pub(super) net_state: HashSet<Atom>,
     motif_hints: Vec<u32>,
     window_type: Vec<Atom>,
     pub(crate) opacity: Option<u32>,
@@ -541,6 +541,42 @@ impl X11Surface {
             .contains(&self.atoms._NET_WM_STATE_FOCUSED)
     }
 
+    /// Returns if the window is in the "above" (always on top) state
+    pub fn is_above(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .net_state
+            .contains(&self.atoms._NET_WM_STATE_ABOVE)
+    }
+
+    /// Returns if the window is in the "below" state
+    pub fn is_below(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .net_state
+            .contains(&self.atoms._NET_WM_STATE_BELOW)
+    }
+
+    /// Returns if the window has requested to be hidden from taskbars
+    pub fn is_skip_taskbar(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .net_state
+            .contains(&self.atoms._NET_WM_STATE_SKIP_TASKBAR)
+    }
+
+    /// Returns if the window has requested to be hidden from pagers
+    pub fn is_skip_pager(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .net_state
+            .contains(&self.atoms._NET_WM_STATE_SKIP_PAGER)
+    }
+
     /// Returns true if the window is client-side decorated
     pub fn is_decorated(&self) -> bool {
         let state = self.state.lock().unwrap();
@@ -606,6 +642,30 @@ impl X11Surface {
             self.change_net_state(&[self.atoms._NET_WM_STATE_FOCUSED], &[])?;
         } else {
             self.change_net_state(&[], &[self.atoms._NET_WM_STATE_FOCUSED])?;
+        }
+        Ok(())
+    }
+
+    /// Sets the window as above (always on top) or not.
+    ///
+    /// Allows the client to reflect this state in their UI.
+    pub fn set_above(&self, above: bool) -> Result<(), ConnectionError> {
+        if above {
+            self.change_net_state(&[self.atoms._NET_WM_STATE_ABOVE], &[])?;
+        } else {
+            self.change_net_state(&[], &[self.atoms._NET_WM_STATE_ABOVE])?;
+        }
+        Ok(())
+    }
+
+    /// Sets the window as below or not.
+    ///
+    /// Allows the client to reflect this state in their UI.
+    pub fn set_below(&self, below: bool) -> Result<(), ConnectionError> {
+        if below {
+            self.change_net_state(&[self.atoms._NET_WM_STATE_BELOW], &[])?;
+        } else {
+            self.change_net_state(&[], &[self.atoms._NET_WM_STATE_BELOW])?;
         }
         Ok(())
     }

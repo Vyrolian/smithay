@@ -125,18 +125,18 @@
 
 use crate::{
     input::{
-        dnd::{DndFocus, DndGrabHandler},
         SeatHandler,
+        dnd::{DndFocus, DndGrabHandler},
     },
     output::Output,
-    utils::{x11rb::X11Source, Client, Logical, Point, Rectangle, Size},
+    utils::{Client, Logical, Point, Rectangle, Size, x11rb::X11Source},
     wayland::{
         selection::SelectionTarget,
         xwayland_shell::{self, XWaylandShellHandler},
     },
 };
 use atomic_float::AtomicF64;
-use calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction};
+use calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic};
 use rustix::fs::OFlags;
 use std::{
     cmp::Reverse,
@@ -146,31 +146,31 @@ use std::{
         io::{AsFd, OwnedFd},
         net::UnixStream,
     },
-    sync::{atomic::Ordering, Arc, Weak},
+    sync::{Arc, Weak, atomic::Ordering},
 };
 use tracing::{debug, debug_span, info, trace, warn};
 use wayland_server::{DisplayHandle, Resource};
 
 pub use x11rb::protocol::xproto::Window as X11Window;
 use x11rb::{
+    COPY_DEPTH_FROM_PARENT,
     connection::Connection as _,
     errors::{ReplyError, ReplyOrIdError},
     protocol::{
+        Event,
         composite::{ConnectionExt as _, Redirect},
         randr::{ConnectionExt as _, Notify, NotifyMask},
         render::{ConnectionExt as _, CreatePictureAux, PictureWrapper},
         xfixes::ConnectionExt as _,
         xproto::{
-            AtomEnum, ChangeWindowAttributesAux, ConfigWindow, ConfigureNotifyEvent, ConfigureWindowAux,
-            ConnectionExt, CreateGCAux, CreateWindowAux, CursorWrapper, EventMask, FontWrapper,
-            GcontextWrapper, ImageFormat, PixmapWrapper, PropMode, Property, QueryExtensionReply, Screen,
-            StackMode, WindowClass, CONFIGURE_NOTIFY_EVENT,
+            AtomEnum, CONFIGURE_NOTIFY_EVENT, ChangeWindowAttributesAux, ConfigWindow, ConfigureNotifyEvent,
+            ConfigureWindowAux, ConnectionExt, CreateGCAux, CreateWindowAux, CursorWrapper, EventMask,
+            FontWrapper, GcontextWrapper, ImageFormat, PixmapWrapper, PropMode, Property,
+            QueryExtensionReply, Screen, StackMode, WindowClass,
         },
-        Event,
     },
     rust_connection::{ConnectionError, DefaultStream, RustConnection},
     wrapper::ConnectionExt as _,
-    COPY_DEPTH_FROM_PARENT,
 };
 
 mod dnd;
@@ -245,6 +245,10 @@ mod atoms {
             _NET_WM_STATE_HIDDEN,
             _NET_WM_STATE_FULLSCREEN,
             _NET_WM_STATE_FOCUSED,
+            _NET_WM_STATE_ABOVE,
+            _NET_WM_STATE_BELOW,
+            _NET_WM_STATE_SKIP_TASKBAR,
+            _NET_WM_STATE_SKIP_PAGER,
             _NET_SUPPORTING_WM_CHECK,
             _XSETTINGS_SETTINGS,
 
@@ -413,6 +417,23 @@ pub trait XwmHandler {
         let _ = (xwm, window);
     }
 
+    /// Window requests to be placed above other windows.
+    fn above_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to no longer be placed above other windows.
+    fn unabove_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to be placed below other windows.
+    fn below_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to no longer be placed below other windows.
+    fn unbelow_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+
     /// Window requests to be resized.
     ///
     /// The window will be holding a grab on the mouse button provided and requests
@@ -446,7 +467,9 @@ pub trait XwmHandler {
     /// The given selection is being read by an X client and needs to be written to the provided file descriptor
     fn send_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_type: String, fd: OwnedFd) {
         let _ = (xwm, selection, mime_type, fd);
-        panic!("`allow_selection_access` returned true without `send_selection` implementation to handle transfers.");
+        panic!(
+            "`allow_selection_access` returned true without `send_selection` implementation to handle transfers."
+        );
     }
 
     /// A new selection was set by an X client with provided mime_types
@@ -725,6 +748,10 @@ impl X11Wm {
                 atoms._NET_WM_STATE_FULLSCREEN,
                 atoms._NET_WM_STATE_MODAL,
                 atoms._NET_WM_STATE_FOCUSED,
+                atoms._NET_WM_STATE_ABOVE,
+                atoms._NET_WM_STATE_BELOW,
+                atoms._NET_WM_STATE_SKIP_TASKBAR,
+                atoms._NET_WM_STATE_SKIP_PAGER,
                 atoms._NET_ACTIVE_WINDOW,
                 atoms._NET_WM_MOVERESIZE,
                 atoms._NET_CLIENT_LIST,
@@ -1281,7 +1308,8 @@ where
 
             xwm.conn.change_window_attributes(
                 n.window,
-                &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+                &ChangeWindowAttributesAux::new()
+                    .event_mask(EventMask::PROPERTY_CHANGE | EventMask::FOCUS_CHANGE),
             )?;
             xwm.conn.flush()?;
 
@@ -1370,6 +1398,21 @@ where
                     // In that case, we set the X11Surface's override-redirect state to false here
                     // to prevent `set_mapped` and `configure` from failing.
                     surface.state.lock().unwrap().override_redirect = false;
+
+                    // Read initial _NET_WM_STATE set by the client before mapping.
+                    // Per EWMH spec, clients may set _NET_WM_STATE prior to mapping
+                    // and the window manager must respect it.
+                    if let Ok(reply) = conn
+                        .get_property(false, win, xwm.atoms._NET_WM_STATE, AtomEnum::ATOM, 0, 1024)?
+                        .reply()
+                    {
+                        if let Some(states) = reply.value32() {
+                            let mut state_lock = surface.state.lock().unwrap();
+                            for atom in states {
+                                state_lock.net_state.insert(atom);
+                            }
+                        }
+                    }
 
                     drop(_guard);
                     state.map_window_request(xwm_id, surface);
@@ -1689,10 +1732,10 @@ where
                                     if let Some(transfer) = selection.incoming.get_mut(&incoming_window) {
                                         match write_selection_callback(fd.as_fd(), conn, atoms, transfer) {
                                             Ok(IncomingAction::WaitForWritable) => {
-                                                return Ok(PostAction::Continue)
+                                                return Ok(PostAction::Continue);
                                             }
                                             Ok(IncomingAction::WaitForProperty) if !transfer.incr_done => {
-                                                return Ok(PostAction::Disable)
+                                                return Ok(PostAction::Disable);
                                             }
                                             Ok(_) | Err(_) => {
                                                 selection
@@ -2058,22 +2101,26 @@ where
             }
         }
         Event::FocusIn(n) => {
-            conn.change_property32(
-                PropMode::REPLACE,
-                xwm.screen.root,
-                xwm.atoms._NET_ACTIVE_WINDOW,
-                AtomEnum::WINDOW,
-                &[n.event],
-            )?;
+            if xwm.windows.iter().any(|x| x.window_id() == n.event) {
+                conn.change_property32(
+                    PropMode::REPLACE,
+                    xwm.screen.root,
+                    xwm.atoms._NET_ACTIVE_WINDOW,
+                    AtomEnum::WINDOW,
+                    &[n.event],
+                )?;
+            }
         }
         Event::FocusOut(n) => {
-            conn.change_property32(
-                PropMode::REPLACE,
-                xwm.screen.root,
-                xwm.atoms._NET_ACTIVE_WINDOW,
-                AtomEnum::WINDOW,
-                &[n.event],
-            )?;
+            if xwm.windows.iter().any(|x| x.window_id() == n.event) {
+                conn.change_property32(
+                    PropMode::REPLACE,
+                    xwm.screen.root,
+                    xwm.atoms._NET_ACTIVE_WINDOW,
+                    AtomEnum::WINDOW,
+                    &[x11rb::NONE],
+                )?;
+            }
         }
         Event::ClientMessage(msg) => {
             if let Some(reply) = conn.get_atom_name(msg.type_)?.reply_unchecked()? {
@@ -2224,6 +2271,30 @@ where
                                     _ => {}
                                 }
                             }
+                            actions if actions.contains(&xwm.atoms._NET_WM_STATE_ABOVE) => match data[0] {
+                                0 => state.unabove_request(xwm_id, surface),
+                                1 => state.above_request(xwm_id, surface),
+                                2 => {
+                                    if surface.is_above() {
+                                        state.unabove_request(xwm_id, surface)
+                                    } else {
+                                        state.above_request(xwm_id, surface)
+                                    }
+                                }
+                                _ => {}
+                            },
+                            actions if actions.contains(&xwm.atoms._NET_WM_STATE_BELOW) => match data[0] {
+                                0 => state.unbelow_request(xwm_id, surface),
+                                1 => state.below_request(xwm_id, surface),
+                                2 => {
+                                    if surface.is_below() {
+                                        state.unbelow_request(xwm_id, surface)
+                                    } else {
+                                        state.below_request(xwm_id, surface)
+                                    }
+                                }
+                                _ => {}
+                            },
                             _ => {}
                         }
                     }

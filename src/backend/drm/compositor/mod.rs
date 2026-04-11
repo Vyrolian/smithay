@@ -135,30 +135,36 @@ use std::{
 };
 
 use drm::{
+<<<<<<< HEAD
     control::{connector, crtc, framebuffer, plane, Device as _, Mode, PageFlipFlags, PlaneType},
+=======
+>>>>>>> upstream/feature/async_pageflip
     Device, DriverCapability,
+    control::{Device as _, Mode, PageFlipFlags, PlaneType, connector, crtc, framebuffer, plane},
 };
 use drm_fourcc::{DrmFormat, DrmFourcc, DrmModifier};
 use indexmap::{IndexMap, IndexSet};
 use smallvec::SmallVec;
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
-use wayland_server::{protocol::wl_buffer::WlBuffer, Resource};
+use wayland_server::{Resource, protocol::wl_buffer::WlBuffer};
 
 #[cfg(feature = "renderer_pixman")]
 use crate::backend::renderer::{
-    pixman::{PixmanError, PixmanRenderer, PixmanTexture},
     Frame as _, ImportAll,
+    pixman::{PixmanError, PixmanRenderer, PixmanTexture},
 };
 use crate::{
     backend::{
+        SwapBuffersError,
         allocator::{
+            Allocator, Buffer, Slot, Swapchain,
             dmabuf::{AsDmabuf, Dmabuf},
             format::{get_opaque, has_alpha},
             gbm::{GbmAllocator, GbmBuffer, GbmBufferFlags, GbmDevice},
-            Allocator, Buffer, Slot, Swapchain,
         },
-        drm::{plane_has_property, DrmError, PlaneDamageClips},
+        drm::{DrmError, PlaneDamageClips, plane_has_property},
         renderer::{
+            Bind, Color32F, DebugFlags, PresentationMode, Renderer, RendererSuper, Texture,
             buffer_y_inverted,
             damage::{Error as OutputDamageTrackerError, OutputDamageTracker},
             element::{
@@ -167,9 +173,11 @@ use crate::{
             },
             sync::SyncPoint,
             utils::{CommitCounter, DamageBag},
+<<<<<<< HEAD
             Bind, Color32F, DebugFlags, PresentationMode, Renderer, RendererSuper, Texture,
+=======
+>>>>>>> upstream/feature/async_pageflip
         },
-        SwapBuffersError,
     },
     output::OutputModeSource,
     utils::{Buffer as BufferCoords, DevPath, Physical, Point, Rectangle, Scale, Size, Transform},
@@ -177,10 +185,10 @@ use crate::{
 };
 
 use super::{
-    error::AccessError,
-    exporter::{gbm::GbmFramebufferExporter, gbm::NodeFilter, ExportBuffer, ExportFramebuffer},
-    surface::VrrSupport,
     DrmSurface, Framebuffer, PlaneClaim, PlaneInfo, Planes,
+    error::AccessError,
+    exporter::{ExportBuffer, ExportFramebuffer, gbm::GbmFramebufferExporter, gbm::NodeFilter},
+    surface::VrrSupport,
 };
 
 mod elements;
@@ -2648,13 +2656,36 @@ where
                 .map(|f| &f.frame)
                 .unwrap_or(&self.current_frame);
 
-            let is_fully_compatible = prepared_frame.frame.is_fully_compatible(previous_state);
+
+            let primary_is_compatible = prepared_frame
+                .frame
+                .plane_state(self.plane())
+                .and_then(|state| {
+                    previous_state
+                        .plane_state(self.plane())
+                        .map(|previous_state| previous_state.is_compatible(state))
+                })
+                .unwrap_or(false);
 
             // If the properties of the plane did not change we can expect the async flip state to
             // also stay unchanged. So in case it failed previously we can skip trying again.
-            if is_fully_compatible {
+            if primary_is_compatible {
                 prepared_frame.frame.async_flip_failed = previous_state.async_flip_failed;
             }
+
+            // Currently async page flips are limited to the primary plane, if any other plane
+            // changes (including the cursor plane) it will fail.
+            //
+            // Note: If this changes we should extend `PlaneInfo` to include a flag indicating
+            // async flip support per plane. This would allows us to check for compatible changes
+            // per plane that supports async flips here. But that also requires us to track the failed
+            // combinations.
+            let only_primary_changed = prepared_frame
+                .frame
+                .planes
+                .iter()
+                .filter(|&(handle, _)| *handle != self.plane())
+                .all(|(_, state)| state.skip);
 
             let mut flip_flags = PageFlipFlags::EVENT;
 
@@ -2663,7 +2694,8 @@ where
             // and failed. An async page flip can for example also fail for certain modifiers,
             // for example on intel compressed formats might not be allowed.
             if prepared_frame.presentation_mode == PresentationMode::Async
-                && is_fully_compatible
+                && only_primary_changed
+                && primary_is_compatible
                 && allow_partial_update
                 && !prepared_frame.frame.async_flip_failed
             {
@@ -3040,6 +3072,15 @@ where
                 }
                 Err(err) => rendering_reason = rendering_reason.or(err),
             };
+        }
+
+        // FIXME: For now we just skip all overlay planes if the requested
+        // mode is not sync. With support for IN_FORMATS_ASYNC we might be
+        // able to lift this restriction again. With IN_FORMATS_ASYNC we should
+        // be able to check if the element requested async using Element::presentation_mode
+        // and check the plane IN_FORMATS_ASYNC against the element buffer format.
+        if presentation_mode != PresentationMode::VSync {
+            return Err(None);
         }
 
         if let Some(plane) = self.try_assign_cursor_plane(
@@ -3714,8 +3755,7 @@ where
         if cached_fb.is_none() {
             trace!(
                 "no cached fb, exporting new fb for element {:?} underlying storage {:?}",
-                element_id,
-                &underlying_storage
+                element_id, &underlying_storage
             );
 
             let fb = self
@@ -3733,8 +3773,7 @@ where
             if fb.is_err() {
                 trace!(
                     "could not import framebuffer for element {:?} underlying storage {:?}",
-                    element_id,
-                    &underlying_storage
+                    element_id, &underlying_storage
                 );
             }
 
@@ -3742,8 +3781,7 @@ where
         } else {
             trace!(
                 "using cached fb for element {:?} underlying storage {:?}",
-                element_id,
-                &underlying_storage
+                element_id, &underlying_storage
             );
         }
 
@@ -4010,9 +4048,7 @@ where
             if frame_state.is_assigned(plane.handle) {
                 trace!(
                     "skipping {:?} with zpos {:?} for element {:?}, already has element assigned, skipping",
-                    plane.handle,
-                    plane.zpos,
-                    element_id,
+                    plane.handle, plane.zpos, element_id,
                 );
                 return Err(None);
             }
@@ -4024,9 +4060,7 @@ where
             if is_underlay && !(element_is_opaque && primary_plane_has_alpha) {
                 trace!(
                     "skipping direct scan-out on underlay {:?} with zpos {:?}, element {:?} is not opaque or primary plane has no alpha channel",
-                    plane.handle,
-                    plane.zpos,
-                    element_id
+                    plane.handle, plane.zpos, element_id
                 );
                 return Err(None);
             }
@@ -4036,7 +4070,8 @@ where
             // we can not assign it to any overlay plane
             if overlaps_with_primary_plane_element && !is_underlay {
                 trace!(
-                    "skipping direct scan-out on {:?} with zpos {:?}, element {:?} overlaps with element on primary plane", plane.handle, plane.zpos, element_id,
+                    "skipping direct scan-out on {:?} with zpos {:?}, element {:?} overlaps with element on primary plane",
+                    plane.handle, plane.zpos, element_id,
                 );
                 return Err(None);
             }
@@ -4058,7 +4093,8 @@ where
             // plane for direct scan-out
             if overlaps_with_plane_underneath {
                 trace!(
-                    "skipping direct scan-out on {:?} with zpos {:?}, element {:?} geometry {:?} overlaps with plane underneath", plane.handle, plane.zpos, element_id, element_config.geometry,
+                    "skipping direct scan-out on {:?} with zpos {:?}, element {:?} geometry {:?} overlaps with plane underneath",
+                    plane.handle, plane.zpos, element_id, element_config.geometry,
                 );
                 return Err(None);
             }
@@ -4079,10 +4115,7 @@ where
             if let Ok(plane_assignment) = test_overlay_plane(plane, &element_config) {
                 trace!(
                     "assigned element {:?} geometry {:?} to compatible {:?} with zpos {:?}",
-                    element_id,
-                    element_config.geometry,
-                    plane.handle,
-                    plane.zpos,
+                    element_id, element_config.geometry, plane.handle, plane.zpos,
                 );
                 return Ok(plane_assignment);
             }
@@ -4094,7 +4127,8 @@ where
             // if the tested element state already tells us that this failed skip the test
             if element_config.failed_planes.overlay_bitmask & (1 << index) != 0 {
                 trace!(
-                    "skipping direct scan-out on {:?} with zpos {:?}, element {:?} geometry {:?}, test already known to fail", plane.handle, plane.zpos, element_id, element_config.geometry,
+                    "skipping direct scan-out on {:?} with zpos {:?}, element {:?} geometry {:?}, test already known to fail",
+                    plane.handle, plane.zpos, element_id, element_config.geometry,
                 );
                 rendering_reason =
                     rendering_reason.or(Some(if presentation_mode == PresentationMode::Async {
@@ -4155,7 +4189,10 @@ where
         };
 
         // Try to assign the element to a plane
-        trace!("testing direct scan-out for element {:?} on {:?} with zpos {:?}: fb: {:?}, element_geometry: {:?}", element_id, plane.handle, plane.zpos, &element_config.buffer.fb, element_config.geometry);
+        trace!(
+            "testing direct scan-out for element {:?} on {:?} with zpos {:?}: fb: {:?}, element_geometry: {:?}",
+            element_id, plane.handle, plane.zpos, &element_config.buffer.fb, element_config.geometry
+        );
 
         if presentation_mode == PresentationMode::Async {
             // For async page flips we want to make sure to avoid unnecessary testing.
@@ -4184,10 +4221,7 @@ where
         } else if !plane.formats.contains(&element_config.properties.format) {
             trace!(
                 "skipping direct scan-out on {:?} with zpos {:?} for element {:?}, format {:?} not supported",
-                plane.handle,
-                plane.zpos,
-                element_id,
-                element_config.properties.format,
+                plane.handle, plane.zpos, element_id, element_config.properties.format,
             );
             return Err(Some(RenderingReason::FormatUnsupported));
         }
@@ -4284,9 +4318,7 @@ where
         let res = if is_compatible && presentation_mode_unchanged {
             trace!(
                 "skipping atomic test for compatible element {:?} on {:?} with zpos {:?}",
-                element_id,
-                plane.handle,
-                plane.zpos,
+                element_id, plane.handle, plane.zpos,
             );
             frame_state.set_state(plane.handle, plane_state);
             true
@@ -4326,18 +4358,14 @@ where
         if res {
             trace!(
                 "successfully assigned element {:?} to {:?} with zpos {:?} for direct scan-out",
-                element_id,
-                plane.handle,
-                plane.zpos,
+                element_id, plane.handle, plane.zpos,
             );
 
             Ok(plane.into())
         } else {
             trace!(
                 "skipping direct scan-out on {:?} with zpos {:?} for element {:?}, test failed",
-                plane.handle,
-                plane.zpos,
-                element_id
+                plane.handle, plane.zpos, element_id
             );
 
             if presentation_mode == PresentationMode::Async {
@@ -4668,10 +4696,10 @@ where
 }
 
 impl<
-        A: std::error::Error + Send + Sync + 'static,
-        B: std::error::Error + Send + Sync + 'static,
-        F: std::error::Error + Send + Sync + 'static,
-    > From<FrameError<A, B, F>> for SwapBuffersError
+    A: std::error::Error + Send + Sync + 'static,
+    B: std::error::Error + Send + Sync + 'static,
+    F: std::error::Error + Send + Sync + 'static,
+> From<FrameError<A, B, F>> for SwapBuffersError
 {
     #[inline]
     fn from(err: FrameError<A, B, F>) -> SwapBuffersError {

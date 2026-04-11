@@ -2,22 +2,22 @@ use std::{cell::RefCell, fmt};
 
 use tracing::{instrument, trace, warn};
 use wayland_server::{
+    Client, Dispatch, DisplayHandle, Resource,
     backend::{ClientId, ObjectId},
     protocol::{
         wl_keyboard::{self, KeyState as WlKeyState, WlKeyboard},
         wl_surface::WlSurface,
     },
-    Client, Dispatch, DisplayHandle, Resource,
 };
 
 use super::WaylandFocus;
 use crate::{
     backend::input::{KeyState, Keycode},
     input::{
-        keyboard::{KeyboardHandle, KeyboardTarget, KeysymHandle, ModifiersState},
         Seat, SeatHandler, SeatState, WeakSeat,
+        keyboard::{KeyboardHandle, KeyboardTarget, KeysymHandle, ModifiersState},
     },
-    utils::{iter::new_locked_obj_iter_from_vec, HookId, Serial},
+    utils::{HookId, Serial, iter::new_locked_obj_iter_from_vec},
     wayland::{
         compositor::{add_destruction_hook, remove_destruction_hook, with_states},
         input_method::InputMethodSeat,
@@ -238,7 +238,7 @@ pub(crate) fn enter_internal<D: SeatHandler + 'static>(
             .get_or_insert::<FocusDestroyHook<D>, _>(Default::default)
             .insert(seat, hook_id)
     }) {
-        remove_destruction_hook(surface, old_hook_id);
+        remove_destruction_hook(surface, &old_hook_id);
     }
 
     let text_input = seat.text_input();
@@ -272,7 +272,7 @@ impl<D: SeatHandler + 'static> KeyboardTarget<D> for WlSurface {
                 .get::<FocusDestroyHook<D>>()
                 .and_then(|hook| hook.remove(seat))
         }) {
-            remove_destruction_hook(self, hook_id);
+            remove_destruction_hook(self, &hook_id);
         };
 
         let text_input = seat.text_input();

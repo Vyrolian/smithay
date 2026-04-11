@@ -52,13 +52,13 @@ use wayland_protocols_wlr::layer_shell::v1::server::{
     zwlr_layer_shell_v1::ZwlrLayerShellV1, zwlr_layer_surface_v1,
 };
 use wayland_server::{
+    Client, DisplayHandle, GlobalDispatch, Resource as _,
     backend::GlobalId,
     protocol::{wl_output::WlOutput, wl_surface},
-    Client, DisplayHandle, GlobalDispatch, Resource as _,
 };
 
 use crate::{
-    utils::{alive_tracker::IsAlive, Logical, Serial, Size, SERIAL_COUNTER},
+    utils::{Logical, SERIAL_COUNTER, Serial, Size, alive_tracker::IsAlive},
     wayland::{
         compositor::{self, BufferAssignment, Cacheable, SurfaceAttributes},
         shell::xdg,
@@ -249,7 +249,7 @@ impl WlrLayerShellState {
     }
 
     /// Access all the shell surfaces known by this handler
-    pub fn layer_surfaces(&self) -> impl DoubleEndedIterator<Item = LayerSurface> {
+    pub fn layer_surfaces(&self) -> impl DoubleEndedIterator<Item = LayerSurface> + use<> {
         self.known_layers.lock().unwrap().clone().into_iter()
     }
 }

@@ -1,18 +1,18 @@
 use std::{borrow::Cow, sync::Arc};
 
 #[cfg(feature = "xwayland")]
-use smithay::xwayland::xwm::XwmOfferData;
-#[cfg(feature = "xwayland")]
 use smithay::xwayland::X11Surface;
+#[cfg(feature = "xwayland")]
+use smithay::xwayland::xwm::XwmOfferData;
 pub use smithay::{
     backend::input::KeyState,
     desktop::{LayerSurface, PopupKind},
     input::{
+        Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
-        Seat,
     },
-    reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
+    reexports::wayland_server::{Resource, backend::ObjectId, protocol::wl_surface::WlSurface},
     utils::{IsAlive, Serial},
     wayland::seat::WaylandFocus,
 };
@@ -32,7 +32,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{WindowElement, SSD},
+    shell::{SSD, WindowElement},
     state::{AnvilState, Backend},
 };
 
@@ -447,7 +447,7 @@ impl<BackendData: Backend> DndFocus<AnvilState<BackendData>> for PointerFocusTar
         match self {
             PointerFocusTarget::WlSurface(surface) => {
                 let offer = match offer {
-                    Some(AnvilOfferData::Wayland(ref mut offer)) => Some(offer),
+                    Some(AnvilOfferData::Wayland(offer)) => Some(offer),
                     None => None,
                     _ => return,
                 };
@@ -456,7 +456,7 @@ impl<BackendData: Backend> DndFocus<AnvilState<BackendData>> for PointerFocusTar
             #[cfg(feature = "xwayland")]
             PointerFocusTarget::X11Surface(surface) => {
                 let offer = match offer {
-                    Some(AnvilOfferData::X11(ref mut offer)) => Some(offer),
+                    Some(AnvilOfferData::X11(offer)) => Some(offer),
                     None => None,
                     _ => return,
                 };
@@ -475,7 +475,7 @@ impl<BackendData: Backend> DndFocus<AnvilState<BackendData>> for PointerFocusTar
         match self {
             PointerFocusTarget::WlSurface(surface) => {
                 let offer = match offer {
-                    Some(AnvilOfferData::Wayland(ref mut offer)) => Some(offer),
+                    Some(AnvilOfferData::Wayland(offer)) => Some(offer),
                     None => None,
                     _ => return,
                 };
@@ -484,7 +484,7 @@ impl<BackendData: Backend> DndFocus<AnvilState<BackendData>> for PointerFocusTar
             #[cfg(feature = "xwayland")]
             PointerFocusTarget::X11Surface(surface) => {
                 let offer = match offer {
-                    Some(AnvilOfferData::X11(ref mut offer)) => Some(offer),
+                    Some(AnvilOfferData::X11(offer)) => Some(offer),
                     None => None,
                     _ => return,
                 };
@@ -503,7 +503,7 @@ impl<BackendData: Backend> DndFocus<AnvilState<BackendData>> for PointerFocusTar
         match self {
             PointerFocusTarget::WlSurface(surface) => {
                 let offer = match offer {
-                    Some(AnvilOfferData::Wayland(ref mut offer)) => Some(offer),
+                    Some(AnvilOfferData::Wayland(offer)) => Some(offer),
                     None => None,
                     _ => return,
                 };
@@ -512,7 +512,7 @@ impl<BackendData: Backend> DndFocus<AnvilState<BackendData>> for PointerFocusTar
             #[cfg(feature = "xwayland")]
             PointerFocusTarget::X11Surface(surface) => {
                 let offer = match offer {
-                    Some(AnvilOfferData::X11(ref mut offer)) => Some(offer),
+                    Some(AnvilOfferData::X11(offer)) => Some(offer),
                     None => None,
                     _ => return,
                 };

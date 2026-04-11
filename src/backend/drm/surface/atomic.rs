@@ -1,10 +1,10 @@
+use drm::control::Device as ControlDevice;
 use drm::control::atomic::AtomicModeReq;
 use drm::control::connector::Interface;
 use drm::control::property::ValueType;
-use drm::control::Device as ControlDevice;
 use drm::control::{
-    connector, crtc, dumbbuffer::DumbBuffer, framebuffer, plane, property, AtomicCommitFlags, Mode,
-    PageFlipFlags, PlaneType,
+    AtomicCommitFlags, Mode, PageFlipFlags, PlaneType, connector, crtc, dumbbuffer::DumbBuffer, framebuffer,
+    plane, property,
 };
 
 #[cfg(debug_assertions)]
@@ -14,8 +14,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::os::unix::io::AsRawFd;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex, RwLock,
+    atomic::{AtomicBool, Ordering},
 };
 
 use crate::backend::drm::error::AccessError;
@@ -24,10 +24,11 @@ use crate::{
     backend::{
         allocator::format::{get_bpp, get_depth},
         drm::{
-            device::atomic::{map_props, PropMapping},
+            DrmDeviceFd,
             device::DrmDeviceInternal,
+            device::atomic::{PropMapping, map_props},
             error::Error,
-            plane_type, DrmDeviceFd,
+            plane_type,
         },
     },
     utils::DevPath,
@@ -1208,16 +1209,21 @@ impl<'a> AtomicRequest<'a> {
         Ok(())
     }
 
-    fn set_plane(&mut self, crtc: crtc::Handle, plane_state: &PlaneState<'a>, is_async: bool) -> Result<(), Error> {
+    fn set_plane(
+        &mut self,
+        crtc: crtc::Handle,
+        plane_state: &PlaneState<'a>,
+        is_async: bool,
+    ) -> Result<(), Error> {
         let handle = plane_state.handle;
         let plane_props = self.plane_props.entry(handle).or_default();
 
         if let Some(config) = plane_state.config.as_ref() {
-                       plane_props.insert("FB_ID", property::Value::Framebuffer(Some(config.fb)));
-              if is_async {
+            plane_props.insert("FB_ID", property::Value::Framebuffer(Some(config.fb)));
+            if is_async {
                 return Ok(());
             }
-             plane_props.insert("CRTC_ID", property::Value::CRTC(Some(crtc)));
+            plane_props.insert("CRTC_ID", property::Value::CRTC(Some(crtc)));
 
             // these are 16.16. fixed point
             plane_props.insert(
@@ -1427,10 +1433,15 @@ impl<'a> AtomicRequest<'a> {
         Ok(())
     }
 
-    fn set_plane(&mut self, crtc: crtc::Handle, plane_state: &PlaneState<'_>, is_async: bool) -> Result<(), Error> {
+    fn set_plane(
+        &mut self,
+        crtc: crtc::Handle,
+        plane_state: &PlaneState<'_>,
+        is_async: bool,
+    ) -> Result<(), Error> {
         let handle = plane_state.handle;
         if let Some(config) = plane_state.config.as_ref() {
-             self.request.add_property(
+            self.request.add_property(
                 handle,
                 self.mapping.plane_prop_handle(handle, "FB_ID")?,
                 property::Value::Framebuffer(Some(config.fb)),
@@ -1447,7 +1458,6 @@ impl<'a> AtomicRequest<'a> {
                 property::Value::CRTC(Some(crtc)),
             );
 
-            
             self.request.add_property(
                 handle,
                 self.mapping.plane_prop_handle(handle, "SRC_X")?,
@@ -1645,13 +1655,13 @@ impl<'a> AtomicRequest<'a> {
         removed_connectors: impl IntoIterator<Item = &'a connector::Handle>,
         planes: impl IntoIterator<Item = &'a PlaneState<'a>>,
         is_async: bool,
-    ) -> Result<AtomicRequest<'a>, Error>{
+    ) -> Result<AtomicRequest<'a>, Error> {
         let mut req = AtomicRequest::new(mapping);
 
         // 2. IF ASYNC: Skip CRTC and connectors completely
         if is_async {
             for plane_state in planes.into_iter() {
-                req.set_plane(crtc, plane_state, true)?; 
+                req.set_plane(crtc, plane_state, true)?;
             }
             return Ok(req);
         }
@@ -1670,7 +1680,7 @@ impl<'a> AtomicRequest<'a> {
         }
 
         Ok(req)
-    } 
+    }
 }
 
 #[cfg(test)]

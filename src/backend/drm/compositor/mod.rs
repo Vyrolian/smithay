@@ -135,10 +135,6 @@ use std::{
 };
 
 use drm::{
-<<<<<<< HEAD
-    control::{connector, crtc, framebuffer, plane, Device as _, Mode, PageFlipFlags, PlaneType},
-=======
->>>>>>> upstream/feature/async_pageflip
     Device, DriverCapability,
     control::{Device as _, Mode, PageFlipFlags, PlaneType, connector, crtc, framebuffer, plane},
 };
@@ -173,10 +169,6 @@ use crate::{
             },
             sync::SyncPoint,
             utils::{CommitCounter, DamageBag},
-<<<<<<< HEAD
-            Bind, Color32F, DebugFlags, PresentationMode, Renderer, RendererSuper, Texture,
-=======
->>>>>>> upstream/feature/async_pageflip
         },
     },
     output::OutputModeSource,
@@ -2656,7 +2648,6 @@ where
                 .map(|f| &f.frame)
                 .unwrap_or(&self.current_frame);
 
-
             let primary_is_compatible = prepared_frame
                 .frame
                 .plane_state(self.plane())
@@ -4211,10 +4202,7 @@ where
             if !async_format_might_supported {
                 trace!(
                     "skipping direct scan-out on {:?} with zpos {:?} for element {:?}, async format {:?} not supported",
-                    plane.handle,
-                    plane.zpos,
-                    element_id,
-                    element_config.properties.format,
+                    plane.handle, plane.zpos, element_id, element_config.properties.format,
                 );
                 return Err(Some(RenderingReason::AsyncFormatUnsupported));
             }

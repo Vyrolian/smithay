@@ -37,7 +37,6 @@ use super::utils::Buffer;
 use super::{
     PresentationMode, Renderer,
     utils::{CommitCounter, DamageSet, OpaqueRegions},
-
 };
 
 pub mod memory;
@@ -571,21 +570,14 @@ pub trait Element {
     /// element, if a capture is queued up, to make sure the framebuffer contents are available for capture.
     ///
     /// Any damage reported by this element will also cause `capture_framebuffer` to be called.
-  fn is_framebuffer_effect(&self) -> bool {
+    fn is_framebuffer_effect(&self) -> bool {
         false
     }
-<<<<<<< HEAD
-    /// Hint for DRM backend on how the element should be presented
-    fn presentation_mode(&self) -> PresentationMode {
-        PresentationMode::VSync
-    } 
-=======
 
     /// Hint for DRM backend on how the element should be presented
     fn presentation_mode(&self) -> PresentationMode {
         PresentationMode::VSync
     }
->>>>>>> upstream/feature/async_pageflip
 }
 
 /// A single render element
@@ -1148,11 +1140,8 @@ macro_rules! render_elements_internal {
                 Self::_GenericCatcher(_) => unreachable!(),
             }
         }
-<<<<<<< HEAD
-        };
-=======
+
     };
->>>>>>> upstream/feature/async_pageflip
     (@draw <$renderer:ty>; $($(#[$meta:meta])* $body:ident=$field:ty $(as <$other_renderer:ty>)?),* $(,)?) => {
         fn draw(
             &self,

@@ -49,7 +49,6 @@ use smithay::{
             damage::Error as OutputDamageTrackerError,
             element::{AsRenderElements, RenderElementStates, memory::MemoryRenderBuffer},
             gles::{Capability, GlesRenderer},
-
             multigpu::{GpuManager, MultiRenderer, gbm::GbmGlesBackend},
         },
         session::{
@@ -1294,13 +1293,10 @@ impl AnvilState<UdevData> {
             .with_pending_frame(|frame| frame.map(|frame| frame.presentation_mode));
 
         if let Some(vblank_remaining_time) = vblank_remaining_time {
-<<<<<<< HEAD
-=======
             let presentation_mode = surface
                 .drm_output
                 .with_pending_frame(|frame| frame.map(|frame| frame.presentation_mode));
 
->>>>>>> upstream/feature/async_pageflip
             if presentation_mode != Some(PresentationMode::Async)
                 && vblank_remaining_time > frame_duration / 2
             {
